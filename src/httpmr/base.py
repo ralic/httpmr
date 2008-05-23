@@ -1,3 +1,11 @@
+class Error(Exception): pass
+
+class NotImplementedError(Error):
+  """This method has not been implemented, override it in a subclass."""
+
+class SinkError(Error): pass
+
+
 class Mapper(object):
 
   def Map(self, key, value):
@@ -9,15 +17,16 @@ class Mapper(object):
     For example, a simple Map method that would be used to count the number of
     times a given value is seen by outputting 1 for every value:
       def Map(self, key, value):
-        yield str(value), "1"
+        yield value, 1
     
-    All yielded output must be a (str, str) tuple.
+    All yielded output must be a (object, object) tuple.
     
     For more information on generators, see
     the official Python documentation at
     http://www.python.org/doc/2.5/tut/node11.html#SECTION00111000000000000000000
     or consider the stock Mappers for more examples.
     """
+    raise NotImplementedError()
 
 
 class Reducer(object):
@@ -41,12 +50,13 @@ class Reducer(object):
     or consider the stock Reducers for more examples.
     
     Args:
-      key: The key (str) to which all of the values correspond
-      values: A list of values (all str) corresponding to the key.
+      key: The key (arbitrary object) to which all of the values correspond
+      values: A list of values (arbitrary objects) corresponding to the key.
     
     Returns:
       A generator
     """
+    raise NotImplementedError()
 
 
 class Source(object):
@@ -68,6 +78,7 @@ class Source(object):
       end_point_inclusive: Whether or not the ending point should be considered
         inclusive.
     """
+    raise NotImplementedError()
   
 
 class Sink(object):
@@ -76,3 +87,4 @@ class Sink(object):
     """Output the provided key and value to persistent storage.
     
     """
+    raise NotImplementedError()
