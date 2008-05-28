@@ -1,0 +1,53 @@
+= HTTP Map/Reduce: A scalable data processing framework for people with web clusters. =
+
+_Status: Pre-Alpha_
+
+HTTPMR is an implementation of Google's famous Map/Reduce data processing model on clusters of HTTP servers.
+
+HTTPMR tries to make only the following assumptions about the computing environment:
+
+  * Access to machines only via HTTP requests.
+  * Requests are assigned randomly to machines by a system which is out of our control.
+  * Requests have timeouts on the order of several seconds.
+  * There is a storage system that is accessible by code receiving HTTP requests.
+  * The data being processed can be broken up into many, many small records, each having a unique identifier.
+  * The storage system can accept >, <, >=, and <= data restrict operations on the data's unique identifier.
+  * Jobs are controlled either by an active modern web browser or a web spidering system (such as wget).
+
+Driven primarily by the needs of users of Google AppEngine (http://appengine.google.com/) for a robust data processing system, HTTMR will hopefully be written in a general-enough way to work in many web clusters.  Bringing HTTMR up in a new environment should require only implementing a few interfaces to the data storage system.
+
+= Example: =
+
+_This is expected to change, and should function only as an inspiration for what we're working towards._
+
+{{{
+from httmpr import base
+from httpmr import sources
+from httpmr import sinks
+
+class WordSplitMapper(base.Mapper):
+
+  def __init__(self, object_text_field):
+    self._object_text_field = object_text_field
+
+  def Map(self, key, value):
+    text = getattr(value, self.object_text_field)
+    splits = text.split(" ")
+    for split in splits:
+      yield split, 1
+
+class WordCountReducer(base.Reducer):
+
+  def Reduce(self, key, values):
+    yield key, sum(values)
+
+def HandleMapReduce(request):
+  base.Master().QuickInit(WordSplitMapper(),
+                          WordCountReducer(),
+                          sources.AppEngineSource(),
+                          sinks.AppEngineSink(),
+                          num_mappers=50,
+                          num_reducers=20).MapReduce(request)
+}}}
+
+A specific URL is then mapped to HandleMapReduce, and you're off to the races!
