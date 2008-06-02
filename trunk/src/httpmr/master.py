@@ -248,7 +248,7 @@ class Master(webapp.RequestHandler):
       
   def GetReduceMaster(self):
     """Handle Reduce controlling page."""
-    return {'urls': self._GetUrlsForShards(MAPPER_TASK_NAME)}
+    return {'urls': self._GetUrlsForShards(REDUCER_TASK_NAME)}
 
   
   def GetReducer(self):
