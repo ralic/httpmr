@@ -71,7 +71,20 @@ class TaskSetTimer(object):
     self.task_completion_times.append(time.time())
   
   def ShouldStop(self):
-    return (time.time() - self.start_time) > (self.timeout_sec * 0.8) 
+    if len(self.task_completion_times) == 0:
+      return False
+    max_execution_time = 0
+    for i in xrange(len(self.task_completion_times)):
+      if i == 0: continue
+      start_time = self.task_completion_times[i-1]
+      end_time = self.task_completion_times[i]
+      max_execution_time = max(max_execution_time,
+                               end_time - start_time)
+    worst_case_completion_time = time.time() + max_execution_time
+    worst_case_completion_time_since_start_time = \
+        worst_case_completion_time - self.start_time
+    return (worst_case_completion_time_since_start_time >
+            self.timeout_sec * 0.8)
 
 
 class Master(webapp.RequestHandler):
