@@ -20,7 +20,7 @@ class DocumentIndex(db.Model):
 class TokenMapper(base.Mapper):
   
   def Map(self, document_title, document):
-    for token in document.contents.split(" "):
+    for token in list(set(document.contents.split(" "))):
       if token:
         logging.info("Yielding %s: %s" % (token, document_title))
         yield token, document_title
@@ -36,7 +36,7 @@ class TokenReducer(base.Reducer):
     yield None, document_index
 
 
-class ConstructTokenIndexMapReduce(appengine.AppEngineMaster):
+class ConstructDocumentIndexMapReduce(appengine.AppEngineMaster):
   
   def __init__(self):
     logging.info("Initializing")
@@ -47,22 +47,12 @@ class ConstructTokenIndexMapReduce(appengine.AppEngineMaster):
                    mapper=TokenMapper(),
                    reducer=TokenReducer(),
                    source=source,
-                   sink=appengine.AppEngineSink(),
-                   num_mappers=20,
-                   num_reducers=10)
+                   sink=appengine.AppEngineSink())
 
 
 def main():
-  for contents in ["dpqfoiew pqoifpqo wief qpwoeif jqpwoiefj pqowiejf qwoiejf",
-                   "fkdjqpoweif poqiwefjp oqiwef npqowiefj qoiwejf ",
-                   "fqpewofiqjp owefq wkenfoiquwef[o  pqweofqwekn nqjkwnef",
-                   "feqpio qwiopjfqo wef pqwnepfo ijqewof qnwefn poqnewfp on"]:
-    title = contents.split(" ")[0]
-    logging.info("Filling store with document title: %s, contents: %s" %
-                 (title, contents))
-    Document(title=title, contents=contents).put()
-  application = webapp.WSGIApplication([('/examples/construct_token_index',
-                                         ConstructTokenIndexMapReduce)],
+  application = webapp.WSGIApplication([('/construct_document_index',
+                                         ConstructDocumentIndexMapReduce)],
                                        debug=True)
   wsgiref.handlers.CGIHandler().run(application)
 

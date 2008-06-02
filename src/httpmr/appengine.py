@@ -94,9 +94,7 @@ class AppEngineMaster(master.Master):
                 mapper=None,
                 reducer=None,
                 source=None,
-                sink=None,
-                num_mappers=-1,
-                num_reducers=-1):
+                sink=None):
     logging.debug("Beginning QuickInit.")
     assert jobname is not None
     self._jobname = jobname
@@ -114,7 +112,5 @@ class AppEngineMaster(master.Master):
     self.SetReducerSource(reducer_source)
     
     self.SetSink(sink)
-    self.SetNumMappers(num_mappers)
-    self.SetNumReducers(num_reducers)
     logging.debug("Done QuickInit.")
     return self
