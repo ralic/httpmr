@@ -1,5 +1,6 @@
 import logging
 import os
+import string
 import time
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp import template
@@ -31,6 +32,32 @@ SOURCE_MAX_ENTRIES = "source_max_entries"
 GREATEST_UNICODE_CHARACTER = "\xEF\xBF\xBD"
 
 
+def tobase(base, number):
+  """Ugly.
+  
+  I really wish I didn't have to copy this over, why doesn't Python have a
+  built-in function for representing an int as a string in an arbitrary base?
+  
+  Copied from:
+    http://www.megasolutions.net/python/How-to-convert-a-number-to-binary_-78436.aspx
+  """
+  number = int(number) 
+  base = int(base)         
+  if base < 2 or base > 36: 
+    raise ValueError, "Base must be between 2 and 36"     
+  if not number: 
+    return 0
+  symbols = string.digits + string.lowercase[:26] 
+  answer = [] 
+  while number: 
+    number, remainder = divmod(number, base) 
+    answer.append(symbols[remainder])       
+  return ''.join(reversed(answer)) 
+
+def tob36(number):
+  return tobase(36, number)
+
+
 class TaskSetTimer(object):
   
   def __init__(self, timeout_sec=10.0):
@@ -57,9 +84,7 @@ class Master(webapp.RequestHandler):
                 source=None,
                 mapper_sink=None,
                 reducer_source=None,
-                sink=None,
-                num_mappers=-1,
-                num_reducers=-1):
+                sink=None):
     logging.debug("Beginning QuickInit.")
     assert jobname is not None
     self._jobname = jobname
@@ -69,8 +94,6 @@ class Master(webapp.RequestHandler):
     self.SetMapperSink(mapper_sink)
     self.SetReducerSource(reducer_source)
     self.SetSink(sink)
-    self.SetNumMappers(num_mappers)
-    self.SetNumReducers(num_reducers)
     logging.debug("Done QuickInit.")
     return self
   
@@ -104,18 +127,6 @@ class Master(webapp.RequestHandler):
   def SetSink(self, sink):
     """Set the data sink to which reducer output should be written."""
     self._sink = sink
-    return self
-  
-  def SetNumMappers(self, num_mappers):
-    """Set the ntarget number of concurrent mappers that should be used."""
-    assert isinstance(num_mappers, int)
-    self._num_mappers = num_mappers
-    return self
-  
-  def SetNumReducers(self, num_reducers):
-    """Set the target number of concurrent reducers that should be used."""
-    assert isinstance(num_reducers, int)
-    self._num_reducers = num_reducers
     return self
   
   def get(self):
@@ -152,23 +163,38 @@ class Master(webapp.RequestHandler):
             "&source_start_point=%(source_start_point)s"
             "&source_end_point=%(source_end_point)s"
             "&source_max_entries=%(source_max_entries)d") % path_data
-    
+  
+  def _GetShardBoundaries(self):
+    boundaries = [""]
+    for i in xrange(35):
+      j = (i + 1)
+      boundaries.append(tob36(j))
+    boundaries.append(GREATEST_UNICODE_CHARACTER)
+    return boundaries
+  
+  def _GetShardBoundaryTuples(self):
+    boundaries = self._GetShardBoundaries()
+    boundary_tuples = []
+    for i in xrange(len(boundaries)):
+      if i == 0:
+        continue
+      boundary_tuples.append((boundaries[i-1], boundaries[i]))
+    return boundary_tuples
+  
+  def _GetUrlsForShards(self, task):
+    urls = []
+    for boundary_tuple in self._GetShardBoundaryTuples():
+      start_point = boundary_tuple[0]
+      end_point = boundary_tuple[1]
+      urls.append(self._NextUrl({"task": task,
+                                 SOURCE_START_POINT: start_point,
+                                 SOURCE_END_POINT: end_point,
+                                 SOURCE_MAX_ENTRIES: 1000}))
+    return urls
+  
   def GetMapMaster(self):
     """Handle Map controlling page."""
-    splits = ['', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p']
-    urls = []
-    for i in xrange(len(splits)):
-      start_index = splits[i]
-      if i == len(splits) - 1:
-        # final index is the greatest unicode character
-        end_index = GREATEST_UNICODE_CHARACTER
-      else:
-        end_index = splits[i+1]
-      urls.append(self._NextUrl({"task": MAPPER_TASK_NAME,
-                                 SOURCE_START_POINT: start_index,
-                                 SOURCE_END_POINT: end_index,
-                                 SOURCE_MAX_ENTRIES: 1000}))
-    return {'urls': urls}
+    return {'urls': self._GetUrlsForShards(MAPPER_TASK_NAME)}
 
   def GetMapper(self):
     """Handle mapper tasks."""
@@ -209,20 +235,8 @@ class Master(webapp.RequestHandler):
       
   def GetReduceMaster(self):
     """Handle Reduce controlling page."""
-    splits = ['', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p']
-    urls = []
-    for i in xrange(len(splits)):
-      start_index = splits[i]
-      if i == len(splits) - 1:
-        # final index is the greatest unicode character
-        end_index = GREATEST_UNICODE_CHARACTER
-      else:
-        end_index = splits[i+1]
-      urls.append(self._NextUrl({"task": REDUCER_TASK_NAME,
-                                 SOURCE_START_POINT: start_index,
-                                 SOURCE_END_POINT: end_index,
-                                 SOURCE_MAX_ENTRIES: 1000}))
-    return {'urls': urls}
+    return {'urls': self._GetUrlsForShards(MAPPER_TASK_NAME)}
+
   
   def GetReducer(self):
     """Handle reducer tasks."""

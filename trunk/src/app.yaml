@@ -4,5 +4,8 @@ runtime: python
 api_version: 1
 
 handlers:
-- url: /examples/construct_token_index.*
-  script: construct_token_index.py
+- url: /construct_document_index.*
+  script: construct_document_index.py
+
+- url: /load_fake_documents
+  script: load_fake_documents.py
