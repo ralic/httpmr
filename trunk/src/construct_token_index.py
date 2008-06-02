@@ -3,7 +3,6 @@ import wsgiref
 from google.appengine.ext import webapp
 from httpmr import appengine
 from httpmr import base
-from httpmr import master
 from wsgiref import handlers
 from google.appengine.ext import db
 
@@ -37,24 +36,17 @@ class TokenReducer(base.Reducer):
     yield None, document_index
 
 
-class ConstructTokenIndexMapReduce(master.Master):
+class ConstructTokenIndexMapReduce(appengine.AppEngineMaster):
   
   def __init__(self):
     logging.info("Initializing")
     job_name = "construct_token_index"
     source = appengine.AppEngineSource(Document.all(),
                                        "title")
-    mapper_sink = appengine.AppEngineIntermediateSink(job_name)
-    reducer_source_query = \
-        appengine.IntermediateValueHolder.all().filter("job_name = ", job_name)
-    reducer_source = appengine.AppEngineSource(reducer_source_query,
-                                               "intermediate_key")
     self.QuickInit(job_name,
                    mapper=TokenMapper(),
                    reducer=TokenReducer(),
                    source=source,
-                   mapper_sink=mapper_sink,
-                   reducer_source=reducer_source,
                    sink=appengine.AppEngineSink(),
                    num_mappers=20,
                    num_reducers=10)

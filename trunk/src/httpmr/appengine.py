@@ -1,6 +1,7 @@
 import logging
 from google.appengine.ext import db
 from httpmr import base
+from httpmr import master
 
 
 class IntermediateValueHolder(db.Model):
@@ -84,3 +85,36 @@ class AppEngineSource(base.Source):
     for model in self.base_query.fetch(limit=max_entries):
       key = getattr(model, self.key_parameter)
       yield key, model
+
+
+class AppEngineMaster(master.Master):
+  
+  def QuickInit(self,
+                jobname,
+                mapper=None,
+                reducer=None,
+                source=None,
+                sink=None,
+                num_mappers=-1,
+                num_reducers=-1):
+    logging.debug("Beginning QuickInit.")
+    assert jobname is not None
+    self._jobname = jobname
+    self.SetMapper(mapper)
+    self.SetReducer(reducer)
+    self.SetSource(source)
+
+    mapper_sink = AppEngineIntermediateSink(jobname)
+    self.SetMapperSink(mapper_sink)
+
+    reducer_source_query = \
+        IntermediateValueHolder.all().filter("job_name = ", jobname)
+    reducer_source = AppEngineSource(reducer_source_query,
+                                     "intermediate_key")
+    self.SetReducerSource(reducer_source)
+    
+    self.SetSink(sink)
+    self.SetNumMappers(num_mappers)
+    self.SetNumReducers(num_reducers)
+    logging.debug("Done QuickInit.")
+    return self
