@@ -22,31 +22,24 @@ class TokenMapper(base.Mapper):
   def Map(self, document_title, document):
     for token in list(set(document.contents.split(" "))):
       if token:
-        logging.info("Yielding %s: %s" % (token, document_title))
         yield token, document_title
 
 
 class TokenReducer(base.Reducer):
   
   def Reduce(self, token, document_titles):
-    document_titles = set(document_titles)
-    logging.info("Reducing %s: %s" % (token, document_titles))
-    document_index = DocumentIndex(token=token,
-                                   document_titles=list(document_titles))
-    yield None, document_index
+    yield None, DocumentIndex(token=token,
+                              document_titles=document_titles)
 
 
 class ConstructDocumentIndexMapReduce(appengine.AppEngineMaster):
   
   def __init__(self):
-    logging.info("Initializing")
-    job_name = "construct_token_index"
-    source = appengine.AppEngineSource(Document.all(),
-                                       "title")
-    self.QuickInit(job_name,
+    self.QuickInit("construct_token_index",
                    mapper=TokenMapper(),
                    reducer=TokenReducer(),
-                   source=source,
+                   source=appengine.AppEngineSource(Document.all(),
+                                                    "title"),
                    sink=appengine.AppEngineSink())
 
 
