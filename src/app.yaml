@@ -1,0 +1,8 @@
+application: httpmr
+version: 1
+runtime: python
+api_version: 1
+
+handlers:
+- url: /examples/construct_token_index.*
+  script: construct_token_index.py

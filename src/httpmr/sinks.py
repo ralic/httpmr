@@ -1,7 +1,7 @@
 from google.appengine.ext import db
 from httpmr import base
 
-class AppEngineSink(httpmr.base.Sink):
+class AppEngineSink(base.Sink):
   
   def Put(self, key, value):
     """Puts the provided value into the AppEngine datastore.  Key discarded.
@@ -14,8 +14,8 @@ class AppEngineSink(httpmr.base.Sink):
     
     Raises: httpmr.base.SinkError on any datastore errors
     """
-    assert isinstance(db.Model, value)
+    assert isinstance(value, db.Model)
     try:
-      db.put(value)
+      value.put()
     except db.Error, e:
       raise base.SinkError(e)

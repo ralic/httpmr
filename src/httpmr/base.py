@@ -64,19 +64,17 @@ class Source(object):
   def Get(self,
           start_point,
           end_point,
-          max_entries,
-          start_point_inclusive=True,
-          end_point_inclusive=True):
+          max_entries):
     """Get a set of data for Mapping
     
+    The data returned by this method must be in ascending order by key.
+    
     Args:
-      start_point: The starting point for data segmentation
-      end_point: The ending point for data segmentation
+      start_point: The starting point for data segmentation.  Values for this
+        key are excluded (restrictions are 'key > start_point')
+      end_point: The ending point for data segmentation.  Values for this key
+        must be included (restrictions are 'key <= end_point')
       max_entries: The maximum number of data points that should be retrieved
-      start_point_inclusive: Whether or not the starting point should be
-        considered inclusive.
-      end_point_inclusive: Whether or not the ending point should be considered
-        inclusive.
     """
     raise NotImplementedError()
   

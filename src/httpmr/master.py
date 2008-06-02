@@ -1,5 +1,8 @@
+import logging
+import os
 import time
 from google.appengine.ext import webapp
+from google.appengine.ext.webapp import template
 from httpmr import base
 from httpmr import sinks
 from httpmr import sources
@@ -11,14 +14,23 @@ class UnknownTaskError(Error): pass
 class MissingRequiredParameterError(Error): pass
 
 
-# Some constants for URL handling
+# Some constants for URL handling.  These values must correspond to the base
+# name of the template that should be rendered at task completion.  For
+# instance, when a mapper task is completed, the name of the template that will
+# be rendered is MAPPER_TASK_NAME + ".html"
+MAP_MASTER_TASK_NAME = "map_master"
 MAPPER_TASK_NAME = "mapper"
+REDUCE_MASTER_TASK_NAME = "reduce_master"
 REDUCER_TASK_NAME = "reducer"
-VALID_TASK_NAMES = [MAPPER_TASK_NAME, REDUCER_TASK_NAME]
+VALID_TASK_NAMES = [MAP_MASTER_TASK_NAME,
+                    MAPPER_TASK_NAME,
+                    REDUCE_MASTER_TASK_NAME,
+                    REDUCER_TASK_NAME]
 
 SOURCE_START_POINT = "source_start_point"
 SOURCE_END_POINT = "source_end_point"
 SOURCE_MAX_ENTRIES = "source_max_entries"
+GREATEST_UNICODE_CHARACTER = "\xEF\xBF\xBD"
 
 
 class TaskSetTimer(object):
@@ -41,18 +53,27 @@ class Master(webapp.RequestHandler):
   """The MapReduce master coordinates mappers, reducers, and data."""
   
   def QuickInit(self,
+                jobname,
                 mapper=None,
                 reducer=None,
                 source=None,
+                mapper_sink=None,
+                reducer_source=None,
                 sink=None,
                 num_mappers=-1,
                 num_reducers=-1):
+    logging.debug("Beginning QuickInit.")
+    assert jobname is not None
+    self._jobname = jobname
     self.SetMapper(mapper)
     self.SetReducer(reducer)
     self.SetSource(source)
+    self.SetMapperSink(mapper_sink)
+    self.SetReducerSource(reducer_source)
     self.SetSink(sink)
     self.SetNumMappers(num_mappers)
     self.SetNumReducers(num_reducers)
+    logging.debug("Done QuickInit.")
     return self
   
   def SetMapper(self, mapper):
@@ -70,6 +91,16 @@ class Master(webapp.RequestHandler):
   def SetSource(self, source):
     """Set the data source from which mapper input should be read."""
     self._source = source
+    return self
+  
+  def SetMapperSink(self, sink):
+    """Set the data sink to which mapper output should be written."""
+    self._mapper_sink = sink
+    return self
+  
+  def SetReducerSource(self, source):
+    """Set the data source from which reducer input should be read."""
+    self._reducer_source = source
     return self
   
   def SetSink(self, sink):
@@ -90,46 +121,162 @@ class Master(webapp.RequestHandler):
     return self
   
   def get(self):
-    """Handle mapper and reducer tasks."""
-    task = self.request.params["task"]
+    """Handle task dispatch."""
+    logging.debug("MapReduce Master Dispatching Request.")
+
+    task = None
+    try:
+      task = self.request.params["task"]
+    except KeyError, e:
+      pass
     if task is None:
-      GetController()
-    elif task is MAPPER_TASK_NAME:
-      GetMapper()
-    elif task is REDUCER_TASK_NAME:
-      GetReducer()
+      task = MAP_MASTER_TASK_NAME
+    
+    template_data = {}
+    if task == MAP_MASTER_TASK_NAME:
+      template_data = self.GetMapMaster()
+    elif task == MAPPER_TASK_NAME:
+      template_data = self.GetMapper()
+    elif task == REDUCE_MASTER_TASK_NAME:
+      template_data = self.GetReduceMaster()
+    elif task == REDUCER_TASK_NAME:
+      template_data = self.GetReducer()
     else:
       raise UnknownTaskError("Task name '%s' is not recognized.  Valid task "
                              "values are %s" % (task, VALID_TASK_NAMES))
+    self.RenderResponse("%s.html" % task, template_data)
+  
+  def _NextUrl(self, path_data):
+    logging.debug("Rendering next url with path data %s" % path_data)
+    path = self.request.path_url
+    path_data["path"] = path
+    return ("%(path)s?task=%(task)s"
+            "&source_start_point=%(source_start_point)s"
+            "&source_end_point=%(source_end_point)s"
+            "&source_max_entries=%(source_max_entries)d") % path_data
     
-  def GetController(self):
-    """Handle controlling page."""
+  def GetMapMaster(self):
+    """Handle Map controlling page."""
+    splits = ['', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p']
+    urls = []
+    for i in xrange(len(splits)):
+      start_index = splits[i]
+      if i == len(splits) - 1:
+        # final index is the greatest unicode character
+        end_index = GREATEST_UNICODE_CHARACTER
+      else:
+        end_index = splits[i+1]
+      urls.append(self._NextUrl({"task": MAPPER_TASK_NAME,
+                                 SOURCE_START_POINT: start_index,
+                                 SOURCE_END_POINT: end_index,
+                                 SOURCE_MAX_ENTRIES: 1000}))
+    return {'urls': urls}
 
   def GetMapper(self):
     """Handle mapper tasks."""
-    start_point = self.request.params(SOURCE_START_POINT)
-    end_point = self.request.params(SOURCE_END_POINT)
-    max_entries = self.request.params(SOURCE_MAX_ENTRIES) or 1000
-    mapper_data = self.source.Get(start_point, end_point, max_entries)
+    # Grab the parameters for this map task from the URL
+    start_point = self.request.params[SOURCE_START_POINT]
+    end_point = self.request.params[SOURCE_END_POINT]
+    max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
+    mapper_data = self._source.Get(start_point, end_point, max_entries)
+    
+    # Initialize the timer, and begin timing our operations
     timer = TaskSetTimer()
     timer.Start()
+    last_key_mapped = None
+    values_mapped = 0
     for key_value_pair in mapper_data:
       if timer.ShouldStop():
-        # Return the last key that was put
-        return "The last key that was put, or None"
+        break
+      key = key_value_pair[0]
+      value = key_value_pair[1]
+      for output_key_value_pair in self._mapper.Map(key, value):
+        output_key = output_key_value_pair[0]
+        output_value = output_key_value_pair[1]
+        self._mapper_sink.Put(output_key, output_value)
+      last_key_mapped = key
+      values_mapped += 1
+      timer.TaskCompleted()
+    
+    next_url = None
+    if values_mapped > 0:
+      logging.debug("Completed %d map operations" % values_mapped)
+      next_url = self._NextUrl({"task": MAPPER_TASK_NAME,
+                                SOURCE_START_POINT: last_key_mapped,
+                                SOURCE_END_POINT: end_point,
+                                SOURCE_MAX_ENTRIES: max_entries})
+    else:
+      next_url = None
+    return { "next_url": next_url }
       
-      # Map, and put its returned values into the sink, retain the last key
-      # put
-      True
+  def GetReduceMaster(self):
+    """Handle Reduce controlling page."""
+    splits = ['', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p']
+    urls = []
+    for i in xrange(len(splits)):
+      start_index = splits[i]
+      if i == len(splits) - 1:
+        # final index is the greatest unicode character
+        end_index = GREATEST_UNICODE_CHARACTER
+      else:
+        end_index = splits[i+1]
+      urls.append(self._NextUrl({"task": REDUCER_TASK_NAME,
+                                 SOURCE_START_POINT: start_index,
+                                 SOURCE_END_POINT: end_index,
+                                 SOURCE_MAX_ENTRIES: 1000}))
+    return {'urls': urls}
   
   def GetReducer(self):
     """Handle reducer tasks."""
-
-
-def main():
-  application = webapp.WSGIApplication([('/', Master)],
-                                       debug=True)
-  wsgiref.handlers.CGIHandler().run(application)
-
-if __name__ == "__main__":
-  main()
+        # Grab the parameters for this map task from the URL
+    start_point = self.request.params[SOURCE_START_POINT]
+    end_point = self.request.params[SOURCE_END_POINT]
+    max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
+    reducer_data = self._reducer_source.Get(start_point, end_point, max_entries)
+    
+    # Retrieve the mapped data from the datastore and sort it by key.
+    # WARNING: There are no guarantees that this will retrieve all the values
+    # for a given key.  TODO: Resolve this
+    reducer_keys_values = {}
+    for key_value_pair in reducer_data:
+      key = key_value_pair[0]
+      value = key_value_pair[1].intermediate_value
+      if key in reducer_keys_values:
+        reducer_keys_values[key].append(value)
+      else:
+        reducer_keys_values[key] = [value]
+    
+    last_key_reduced = None
+    keys_reduced = 0
+    # Initialize the timer, and begin timing our operations
+    timer = TaskSetTimer()
+    timer.Start()
+    for key in reducer_keys_values:
+      if timer.ShouldStop():
+        break
+      values = reducer_keys_values[key]
+      for output_key_value_pair in self._reducer.Reduce(key, values):
+        output_key = output_key_value_pair[0]
+        output_value = output_key_value_pair[1]
+        self._sink.Put(output_key, output_value)
+      last_key_reduced = key
+      keys_reduced += 1
+      timer.TaskCompleted()
+    
+    next_url = None
+    if keys_reduced > 0:
+      logging.debug("Completed %d reduce operations" % keys_reduced)
+      next_url = self._NextUrl({"task": REDUCER_TASK_NAME,
+                                SOURCE_START_POINT: last_key_reduced,
+                                SOURCE_END_POINT: end_point,
+                                SOURCE_MAX_ENTRIES: max_entries})
+    else:
+      next_url = None
+    return { "next_url": next_url }
+  
+  def RenderResponse(self, template_name, template_data):
+    path = os.path.join(os.path.dirname(__file__),
+                        'templates',
+                        template_name)
+    logging.debug("Rendering template at path %s" % path)
+    self.response.out.write(template.render(path, template_data))

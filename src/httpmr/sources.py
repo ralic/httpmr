@@ -1,5 +1,6 @@
+import base
+import logging
 from google.appengine.ext import db
-from httmr import base
 
 class AppEngineSource(base.Source):
 
@@ -37,20 +38,11 @@ class AppEngineSource(base.Source):
   def Get(self,
         start_point,
         end_point,
-        max_entries,
-        start_point_inclusive=True,
-        end_point_inclusive=True):
-    start_filter_operator = " > "
-    if start_point_inclusive:
-      start_filter_operator = " >= "
-    start_filter = "".join((self.key_parameter, start_filter_operator))
-    self.base_query.filter(start_filter, start_point)
-    
-    end_filter_operator = " < "
-    if end_point_inclusive:
-      end_filter_operator = " <= "
-    end_filter = "".join((self.key_parameter, end_filter_operator))
-    self.base_query.filter(end_filter, end_point)
-    
+        max_entries):
+    assert isinstance(max_entries, int)
+    self.base_query.filter("%s > " % self.key_parameter, start_point)
+    self.base_query.filter("%s <= " % self.key_parameter, end_point)
+    self.base_query.order(self.key_parameter)
     for model in self.base_query.fetch(limit=max_entries):
-      yield getattr(model, key_parameter), model
+      key = getattr(model, self.key_parameter)
+      yield key, model
