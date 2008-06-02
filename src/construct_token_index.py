@@ -1,10 +1,9 @@
 import logging
 import wsgiref
 from google.appengine.ext import webapp
+from httpmr import appengine
 from httpmr import base
 from httpmr import master
-from httpmr import sinks
-from httpmr import sources
 from wsgiref import handlers
 from google.appengine.ext import db
 
@@ -17,23 +16,6 @@ class Document(db.Model):
 class DocumentIndex(db.Model):
   token = db.StringProperty(required=True)
   document_titles = db.StringListProperty()
-
-
-class IntermediateValueHolder(db.Model):
-  job_name = db.StringProperty(required=True)
-  intermediate_key = db.StringProperty(required=True)
-  intermediate_value = db.TextProperty(required=True)
-
-
-class AppEngineIntermediateSink(sinks.AppEngineSink):
-  
-  def __init__(self, job_name):
-    self._job_name = job_name
-  
-  def Put(self, key, value):
-    IntermediateValueHolder(job_name=self._job_name,
-                            intermediate_key=key,
-                            intermediate_value=value).put()
 
 
 class TokenMapper(base.Mapper):
@@ -60,20 +42,20 @@ class ConstructTokenIndexMapReduce(master.Master):
   def __init__(self):
     logging.info("Initializing")
     job_name = "construct_token_index"
-    source = sources.AppEngineSource(Document.all(),
-                                     "title")
-    mapper_sink = AppEngineIntermediateSink(job_name)
+    source = appengine.AppEngineSource(Document.all(),
+                                       "title")
+    mapper_sink = appengine.AppEngineIntermediateSink(job_name)
     reducer_source_query = \
-        IntermediateValueHolder.all().filter("job_name = ", job_name)
-    reducer_source = sources.AppEngineSource(reducer_source_query,
-                                             "intermediate_key")
+        appengine.IntermediateValueHolder.all().filter("job_name = ", job_name)
+    reducer_source = appengine.AppEngineSource(reducer_source_query,
+                                               "intermediate_key")
     self.QuickInit(job_name,
                    mapper=TokenMapper(),
                    reducer=TokenReducer(),
                    source=source,
                    mapper_sink=mapper_sink,
                    reducer_source=reducer_source,
-                   sink=sinks.AppEngineSink(),
+                   sink=appengine.AppEngineSink(),
                    num_mappers=20,
                    num_reducers=10)
 

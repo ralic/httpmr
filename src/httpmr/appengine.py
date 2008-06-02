@@ -1,6 +1,44 @@
-import base
 import logging
 from google.appengine.ext import db
+from httpmr import base
+
+
+class IntermediateValueHolder(db.Model):
+  job_name = db.StringProperty(required=True)
+  intermediate_key = db.StringProperty(required=True)
+  intermediate_value = db.TextProperty(required=True)
+
+
+class AppEngineSink(base.Sink):
+  
+  def Put(self, key, value):
+    """Puts the provided value into the AppEngine datastore.  Key discarded.
+    
+    Args:
+      key: Ignored
+      value: An instance of a db.Model descendent
+    
+    Returns: None
+    
+    Raises: httpmr.base.SinkError on any datastore errors
+    """
+    assert isinstance(value, db.Model)
+    try:
+      value.put()
+    except db.Error, e:
+      raise base.SinkError(e)
+
+
+class AppEngineIntermediateSink(AppEngineSink):
+  
+  def __init__(self, job_name):
+    self._job_name = job_name
+  
+  def Put(self, key, value):
+    IntermediateValueHolder(job_name=self._job_name,
+                            intermediate_key=key,
+                            intermediate_value=value).put()
+                            
 
 class AppEngineSource(base.Source):
 
