@@ -266,6 +266,7 @@ class Master(webapp.RequestHandler):
     for key_value_pair in reducer_data:
       key = key_value_pair[0]
       value = key_value_pair[1].intermediate_value
+      logging.info("Reducing %s: %s" % (key, value))
       if key in reducer_keys_values:
         reducer_keys_values[key].append(value)
       else:
