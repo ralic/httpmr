@@ -19,7 +19,6 @@ Driven primarily by the needs of users of Google AppEngine (http://appengine.goo
 = Example: =
 
 {{{
-import logging
 import wsgiref
 from google.appengine.ext import webapp
 from httpmr import appengine
