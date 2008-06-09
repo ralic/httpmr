@@ -1,4 +1,3 @@
-import logging
 import wsgiref
 from google.appengine.ext import webapp
 from httpmr import appengine
