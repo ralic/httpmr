@@ -12,6 +12,7 @@ import urlparse
 
 MAP_MASTER_TASK_NAME = "map_master"
 REDUCE_MASTER_TASK_NAME = "reduce_master"
+INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME = "cleanup_master"
 INFINITE_PARAMETER_VALUE = -1
 
 
@@ -112,8 +113,8 @@ class OperationThread(threading.Thread):
       try:
         tries += 1
         return self._Fetch(url)
-      except urllib2.HTTPError, e:
-        logging.warning("HTTPError on fetch of %s: %s" % (url, str(e)))
+      except urllib2.URLError, e:
+        logging.warning("URLError on fetch of %s: %s" % (url, str(e)))
         self._WaitForRetry(tries)
     raise TooManyTriesError("Too many tries on URL %s" % url)
   
@@ -182,13 +183,23 @@ class HTTPMRDriver(object):
     self._LaunchPhase(MAP_MASTER_TASK_NAME, self._AllMapOperationsComplete)
   
   def _AllMapOperationsComplete(self):
+    logging.info("Done Mapping!")
     self._Reduce()
   
   def _Reduce(self):
-    self._LaunchPhase(REDUCE_MASTER_TASK_NAME, self._AllReduceOperationsComplete)
+    self._LaunchPhase(REDUCE_MASTER_TASK_NAME,
+                      self._AllReduceOperationsComplete)
   
   def _AllReduceOperationsComplete(self):
-    logging.info("Done!")
+    logging.info("Done Reducing!")
+    self._Cleanup()
+    
+  def _Cleanup(self):
+    self._LaunchPhase(INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME,
+                      self._AllCleanupOperationsComplete)
+    
+  def _AllCleanupOperationsComplete(self):
+    logging.info("Done Cleaning Up!")
   
   def _LaunchPhase(self, phase_task_name, all_operations_complete_callback):
     base_urls = self._GetInitialUrls(phase_task_name)

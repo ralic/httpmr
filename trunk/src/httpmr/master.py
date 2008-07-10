@@ -6,6 +6,7 @@ from google.appengine.ext import webapp
 from google.appengine.ext.webapp import template
 from httpmr import base
 from httpmr import driver
+from httpmr import sinks
 from wsgiref import handlers
 
 
@@ -22,10 +23,15 @@ MAP_MASTER_TASK_NAME = driver.MAP_MASTER_TASK_NAME
 MAPPER_TASK_NAME = "mapper"
 REDUCE_MASTER_TASK_NAME = driver.REDUCE_MASTER_TASK_NAME
 REDUCER_TASK_NAME = "reducer"
+INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME = \
+    driver.INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME
+INTERMEDIATE_DATA_CLEANUP_TASK_NAME = "cleanup"
 VALID_TASK_NAMES = [MAP_MASTER_TASK_NAME,
                     MAPPER_TASK_NAME,
                     REDUCE_MASTER_TASK_NAME,
-                    REDUCER_TASK_NAME]
+                    REDUCER_TASK_NAME,
+                    INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME,
+                    INTERMEDIATE_DATA_CLEANUP_TASK_NAME]
 
 SOURCE_START_POINT = "source_start_point"
 SOURCE_END_POINT = "source_end_point"
@@ -146,6 +152,17 @@ class Master(webapp.RequestHandler):
     assert isinstance(reducer, base.Reducer)
     self._reducer = reducer
     return self
+  
+  def SetCleanupMapper(self, cleanup_mapper):
+    """Set the Mapper that should be used to clean up the intermediate data.
+    
+    Sets a Mapper that will clean up the intermediate data created by the
+    primary Mapper class.  This Mapper's source will be the same as the
+    Reducer's source.
+    """
+    assert isinstance(cleanup_mapper, base.Mapper)
+    self._cleanup_mapper = cleanup_mapper
+    return self
     
   def SetSource(self, source):
     """Set the data source from which mapper input should be read."""
@@ -188,6 +205,10 @@ class Master(webapp.RequestHandler):
       template_data = self.GetReduceMaster()
     elif task == REDUCER_TASK_NAME:
       template_data = self.GetReducer()
+    elif task == INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME:
+      template_data = self.GetCleanupMaster()
+    elif task == INTERMEDIATE_DATA_CLEANUP_TASK_NAME:
+      template_data = self.GetCleanupMapper()
     else:
       raise UnknownTaskError("Task name '%s' is not recognized.  Valid task "
                              "values are %s" % (task, VALID_TASK_NAMES))
@@ -236,11 +257,18 @@ class Master(webapp.RequestHandler):
 
   def GetMapper(self):
     """Handle mapper tasks."""
+    self._GetGeneralMapper(self._mapper, self._source, self._mapper_sink)
+  
+  def _GetGeneralMapper(self, mapper, source, sink):
+    """Handle general Mapper tasks.
+    
+    specifically base mapping and intermediate data cleanup.
+    """
     # Grab the parameters for this map task from the URL
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
-    mapper_data = self._source.Get(start_point, end_point, max_entries)
+    mapper_data = source.Get(start_point, end_point, max_entries)
     
     # Initialize the timer, and begin timing our operations
     timer = TaskSetTimer()
@@ -252,10 +280,10 @@ class Master(webapp.RequestHandler):
         break
       key = key_value_pair[0]
       value = key_value_pair[1]
-      for output_key_value_pair in self._mapper.Map(key, value):
+      for output_key_value_pair in mapper.Map(key, value):
         output_key = output_key_value_pair[0]
         output_value = output_key_value_pair[1]
-        self._mapper_sink.Put(output_key, output_value)
+        sink.Put(output_key, output_value)
       last_key_mapped = key
       values_mapped += 1
       timer.TaskCompleted()
@@ -275,7 +303,6 @@ class Master(webapp.RequestHandler):
     """Handle Reduce controlling page."""
     return {'urls': self._GetUrlsForShards(REDUCER_TASK_NAME)}
 
-  
   def GetReducer(self):
     """Handle reducer tasks."""
         # Grab the parameters for this map task from the URL
@@ -291,7 +318,6 @@ class Master(webapp.RequestHandler):
     for key_value_pair in reducer_data:
       key = key_value_pair[0]
       value = key_value_pair[1].intermediate_value
-      logging.info("Reducing %s: %s" % (key, value))
       if key in reducer_keys_values:
         reducer_keys_values[key].append(value)
       else:
@@ -324,6 +350,17 @@ class Master(webapp.RequestHandler):
     else:
       next_url = None
     return { "next_url": next_url }
+  
+    
+  def GetCleanupMaster(self):
+    """Handle Cleanup controlling page."""
+    return {'urls': self._GetUrlsForShards(INTERMEDIATE_DATA_CLEANUP_TASK_NAME)}
+  
+  def GetCleanupMapper(self):
+    """Handle Cleanup Mapper tasks."""
+    self._GetGeneralMapper(self._cleanup_mapper,
+                           self._reducer_source,
+                           sinks.NoOpSink())
   
   def RenderResponse(self, template_name, template_data):
     path = os.path.join(os.path.dirname(__file__),

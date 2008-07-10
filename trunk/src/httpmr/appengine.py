@@ -171,6 +171,18 @@ class IntermediateAppEngineSource(base.Source):
       return value.intermediate_key
 
 
+class AppEngineValueDeletingMapper(base.Mapper):
+  """A Mapper that deletes every value given to it.
+  
+  Useful for cleaning up intermediate data.
+  """ 
+  
+  def Map(self, key, value):
+    """Delete the supplied value."""
+    value.delete()
+    yield key, value
+
+
 class AppEngineMaster(master.Master):
   
   def QuickInit(self,
@@ -184,6 +196,7 @@ class AppEngineMaster(master.Master):
     self._jobname = jobname
     self.SetMapper(mapper)
     self.SetReducer(reducer)
+    self.SetCleanupMapper(AppEngineValueDeletingMapper())
     self.SetSource(source)
 
     self.SetMapperSink(AppEngineIntermediateSink(jobname))
