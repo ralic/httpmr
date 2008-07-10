@@ -5,6 +5,7 @@ import time
 from google.appengine.ext import webapp
 from google.appengine.ext.webapp import template
 from httpmr import base
+from httpmr import driver
 from wsgiref import handlers
 
 
@@ -17,9 +18,9 @@ class MissingRequiredParameterError(Error): pass
 # name of the template that should be rendered at task completion.  For
 # instance, when a mapper task is completed, the name of the template that will
 # be rendered is MAPPER_TASK_NAME + ".html"
-MAP_MASTER_TASK_NAME = "map_master"
+MAP_MASTER_TASK_NAME = driver.MAP_MASTER_TASK_NAME
 MAPPER_TASK_NAME = "mapper"
-REDUCE_MASTER_TASK_NAME = "reduce_master"
+REDUCE_MASTER_TASK_NAME = driver.REDUCE_MASTER_TASK_NAME
 REDUCER_TASK_NAME = "reducer"
 VALID_TASK_NAMES = [MAP_MASTER_TASK_NAME,
                     MAPPER_TASK_NAME,
@@ -85,6 +86,30 @@ class TaskSetTimer(object):
         worst_case_completion_time - self.start_time
     return (worst_case_completion_time_since_start_time >
             self.timeout_sec * 0.8)
+
+
+class OperationStatistics(object):
+  
+  READ = "read"
+  WRITE = "write"
+  COMPUTE = "compute"
+  operation_names = [READ, WRITE, COMPUTE]
+  
+  def __init__(self):
+    self.operation_timing = {}
+    for name in self.operation_names:
+      self.operation_timing[name] = 0
+  
+  def Start(self):
+    self.last_operation_time = time.time()
+  
+  def _Increment(self, name):
+    original = self.operation_timing[name]
+    self.operation_timing[name] = original + time.time() - self.last_operation_time
+    self.last_operation_time = time.time()
+  
+  def ReadOperationFinished(self):
+    self.operation_timing[READ]
 
 
 class Master(webapp.RequestHandler):
