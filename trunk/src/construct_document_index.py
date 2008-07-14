@@ -39,7 +39,9 @@ class ConstructDocumentIndexMapReduce(appengine.AppEngineMaster):
                    reducer=TokenReducer(),
                    source=appengine.AppEngineSource(Document.all(),
                                                     "title"),
-                   sink=appengine.AppEngineSink())
+                   sink=appengine.AppEngineSink(),
+                   intermediate_values_set_job_name=False,
+                   intermediate_values_set_nonsense_value=False)
 
 
 def main():
