@@ -98,24 +98,38 @@ class OperationStatistics(object):
   
   READ = "read"
   WRITE = "write"
-  COMPUTE = "compute"
-  operation_names = [READ, WRITE, COMPUTE]
+  MAP = "map"
+  REDUCE = "reduce"
+  _valid_operation_names = [READ, WRITE, MAP, REDUCE]
   
   def __init__(self):
-    self.operation_timing = {}
-    for name in self.operation_names:
-      self.operation_timing[name] = 0
+    self._operation_timing = {}
+    for name in self._valid_operation_names:
+      self._operation_timing[name] = 0
+    self._started = False
   
-  def Start(self):
-    self.last_operation_time = time.time()
+  def Start(self, operation):
+    assert not self._started
+    assert operation in self._valid_operation_names
+    self._started = True
+    self._operation = operation
+    self._last_operation_time = time.time()
   
   def _Increment(self, name):
-    original = self.operation_timing[name]
-    self.operation_timing[name] = original + time.time() - self.last_operation_time
-    self.last_operation_time = time.time()
+    original = self._operation_timing[name]
+    self._operation_timing[name] = \
+        original + time.time() - self._last_operation_time
   
-  def ReadOperationFinished(self):
-    self.operation_timing[READ]
+  def Stop(self):
+    assert self._started
+    self._started = False
+    self._Increment(self._operation)
+  
+  def GetStatistics(self):
+    lines = []
+    for key in self._operation_timing:
+      lines.append("%s %s" % (key, self._operation_timing[key]))
+    return "\n".join(lines)
 
 
 class Master(webapp.RequestHandler):
@@ -224,6 +238,8 @@ class Master(webapp.RequestHandler):
             "&source_max_entries=%(source_max_entries)d") % path_data
   
   def _GetShardBoundaries(self):
+    # TODO(peterdolan): Expand this to allow an arbitrary number of shards
+    # instead of a fixed set of 36 shards.
     boundaries = [""]
     for i in xrange(35):
       j = (i + 1)
@@ -257,36 +273,55 @@ class Master(webapp.RequestHandler):
 
   def GetMapper(self):
     """Handle mapper tasks."""
-    self._GetGeneralMapper(self._mapper, self._source, self._mapper_sink)
+    return self._GetGeneralMapper(self._mapper, self._source, self._mapper_sink)
   
   def _GetGeneralMapper(self, mapper, source, sink):
     """Handle general Mapper tasks.
     
     specifically base mapping and intermediate data cleanup.
     """
+    # Initialize the statistics object, to time the operations for reporting
+    statistics = OperationStatistics()
+
     # Grab the parameters for this map task from the URL
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
+    
+    statistics.Start(OperationStatistics.READ)
     mapper_data = source.Get(start_point, end_point, max_entries)
+    statistics.Stop()
     
     # Initialize the timer, and begin timing our operations
     timer = TaskSetTimer()
     timer.Start()
+    
     last_key_mapped = None
     values_mapped = 0
+
+    statistics.Start(OperationStatistics.READ)
     for key_value_pair in mapper_data:
+      statistics.Stop()
       if timer.ShouldStop():
         break
       key = key_value_pair[0]
       value = key_value_pair[1]
+      statistics.Start(OperationStatistics.MAP)
       for output_key_value_pair in mapper.Map(key, value):
+        statistics.Stop()
         output_key = output_key_value_pair[0]
         output_value = output_key_value_pair[1]
+        
+        statistics.Start(OperationStatistics.WRITE)
         sink.Put(output_key, output_value)
+        statistics.Stop()
+        
+        statistics.Start(OperationStatistics.MAP)
+      statistics.Stop()
       last_key_mapped = key
       values_mapped += 1
       timer.TaskCompleted()
+      statistics.Start(OperationStatistics.READ)
     
     next_url = None
     if values_mapped > 0:
@@ -297,7 +332,8 @@ class Master(webapp.RequestHandler):
                                 SOURCE_MAX_ENTRIES: max_entries})
     else:
       next_url = None
-    return { "next_url": next_url }
+    return { "next_url": next_url,
+             "statistics": statistics.GetStatistics() }
       
   def GetReduceMaster(self):
     """Handle Reduce controlling page."""
@@ -305,23 +341,17 @@ class Master(webapp.RequestHandler):
 
   def GetReducer(self):
     """Handle reducer tasks."""
-        # Grab the parameters for this map task from the URL
+    statistics = OperationStatistics()
+    
+    # Grab the parameters for this map task from the URL
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
-    reducer_data = self._reducer_source.Get(start_point, end_point, max_entries)
     
-    # Retrieve the mapped data from the datastore and sort it by key.
-    # WARNING: There are no guarantees that this will retrieve all the values
-    # for a given key.  TODO: Resolve this
-    reducer_keys_values = {}
-    for key_value_pair in reducer_data:
-      key = key_value_pair[0]
-      value = key_value_pair[1].intermediate_value
-      if key in reducer_keys_values:
-        reducer_keys_values[key].append(value)
-      else:
-        reducer_keys_values[key] = [value]
+    reducer_keys_values = self._GetReducerKeyValues(start_point,
+                                                    end_point,
+                                                    max_entries,
+                                                    statistics)
     
     last_key_reduced = None
     keys_reduced = 0
@@ -332,10 +362,19 @@ class Master(webapp.RequestHandler):
       if timer.ShouldStop():
         break
       values = reducer_keys_values[key]
+      statistics.Start(OperationStatistics.REDUCE)
       for output_key_value_pair in self._reducer.Reduce(key, values):
+        statistics.Stop()
+        
         output_key = output_key_value_pair[0]
         output_value = output_key_value_pair[1]
+        
+        statistics.Start(OperationStatistics.WRITE)
         self._sink.Put(output_key, output_value)
+        statistics.Stop()
+        
+        statistics.Start(OperationStatistics.REDUCE)
+      statistics.Stop()
       last_key_reduced = key
       keys_reduced += 1
       timer.TaskCompleted()
@@ -349,7 +388,33 @@ class Master(webapp.RequestHandler):
                                 SOURCE_MAX_ENTRIES: max_entries})
     else:
       next_url = None
-    return { "next_url": next_url }
+    return { "next_url": next_url,
+             "statistics": statistics.GetStatistics() }
+  
+  def _GetReducerKeyValues(self,
+                           start_point,
+                           end_point,
+                           max_entries,
+                           statistics):
+    statistics.Start(OperationStatistics.READ)
+    reducer_data = self._reducer_source.Get(start_point, end_point, max_entries)
+    statistics.Stop()
+    
+    # Retrieve the mapped data from the datastore and sort it by key.
+    #
+    # The Source interface specification guarantees that we will retrieve every
+    # intermediate value for a given key.
+    reducer_keys_values = {}
+    statistics.Start(OperationStatistics.READ)
+    for key_value_pair in reducer_data:
+      key = key_value_pair[0]
+      value = key_value_pair[1].intermediate_value
+      if key in reducer_keys_values:
+        reducer_keys_values[key].append(value)
+      else:
+        reducer_keys_values[key] = [value]
+    statistics.Stop()
+    return reducer_keys_values
   
     
   def GetCleanupMaster(self):
