@@ -307,6 +307,7 @@ class Master(webapp.RequestHandler):
     statistics = OperationStatistics()
 
     # Grab the parameters for this map task from the URL
+    task = self.request.params["task"]
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
@@ -351,7 +352,7 @@ class Master(webapp.RequestHandler):
     next_url = None
     if values_mapped > 0:
       logging.debug("Completed %d map operations" % values_mapped)
-      next_url = self._TaskUrl({"task": MAPPER_TASK_NAME,
+      next_url = self._TaskUrl({"task": task,
                                 SOURCE_START_POINT: last_key_mapped,
                                 SOURCE_END_POINT: end_point,
                                 SOURCE_MAX_ENTRIES: max_entries,
