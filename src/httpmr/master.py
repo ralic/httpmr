@@ -40,7 +40,7 @@ VALID_TASK_NAMES = [MAP_MASTER_TASK_NAME,
 SOURCE_START_POINT = "source_start_point"
 SOURCE_END_POINT = "source_end_point"
 SOURCE_MAX_ENTRIES = "source_max_entries"
-OPERATION_TIMEOUT_SEC = "operation_timeout"
+OPERATION_TIMEOUT_SEC = driver.OPERATION_TIMEOUT_SEC
 DEFAULT_OPERATION_TIMEOUT_SEC = 10
 GREATEST_UNICODE_CHARACTER = "\xEF\xBF\xBD"
 
@@ -278,7 +278,7 @@ class Master(webapp.RequestHandler):
       
       timeout = DEFAULT_OPERATION_TIMEOUT_SEC
       if OPERATION_TIMEOUT_SEC in self.request.params:
-        timeout = int(self.request.params[OPERATION_TIMEOUT_SEC])
+        timeout = float(self.request.params[OPERATION_TIMEOUT_SEC])
       
       urls.append(self._TaskUrl({"task": task,
                                  SOURCE_START_POINT: start_point,
@@ -310,7 +310,7 @@ class Master(webapp.RequestHandler):
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
-    timeout = int(self.request.params[OPERATION_TIMEOUT_SEC])
+    timeout = float(self.request.params[OPERATION_TIMEOUT_SEC])
     
     statistics.Start(OperationStatistics.READ)
     mapper_data = source.Get(start_point, end_point, max_entries)
@@ -375,7 +375,7 @@ class Master(webapp.RequestHandler):
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
-    timeout = int(self.request.params[OPERATION_TIMEOUT_SEC])
+    timeout = float(self.request.params[OPERATION_TIMEOUT_SEC])
     
     reducer_keys_values = self._GetReducerKeyValues(start_point,
                                                     end_point,
