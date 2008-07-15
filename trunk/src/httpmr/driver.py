@@ -26,6 +26,7 @@ import urlparse
 MAP_MASTER_TASK_NAME = "map_master"
 REDUCE_MASTER_TASK_NAME = "reduce_master"
 INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME = "cleanup_master"
+OPERATION_TIMEOUT_SEC = "operation_timeout"
 INFINITE_PARAMETER_VALUE = -1
 
 
@@ -208,6 +209,7 @@ class OperationThread(threading.Thread):
         return self._Fetch(url)
       except urllib2.HTTPError, e:
         logging.warning("HTTPError on fetch of %s: %s" % (url, str(e)))
+        url = self._ReduceOperationTimeout(url)
         self.results.errors.append(e)
         self._WaitForRetry(tries)
     raise TooManyTriesError("Too many tries on URL %s" % url)
@@ -232,6 +234,24 @@ class OperationThread(threading.Thread):
              safe_query,
              parts.fragment)
     return urlparse.urlunsplit(parts)
+
+  def _ReduceOperationTimeout(self, url):
+    current_timeout = None
+    # TODO: Hand URL parameter parsing off to a library, here and elsewhere
+    params = url.split("?")[1]
+    for key_value in params.split("&"):
+      (key, value) = key_value.split("=", 2)
+      if key == OPERATION_TIMEOUT_SEC:
+        # At this point current_timeout is a string
+        current_timeout = value
+    if current_timeout is not None:
+      new_timeout = float(current_timeout) / 2
+      return url.replace("%s=%s" % (OPERATION_TIMEOUT_SEC, current_timeout),
+                         "%s=%s" % (OPERATION_TIMEOUT_SEC, new_timeout))
+    else:
+      logging.warning("Could not parse the operation timeout from URL '%s', "
+                      "operation retry with original timeout value." % url)
+      return url
   
   def _PopulateResults(self):
     parser = OperationResultHTMLParser()
