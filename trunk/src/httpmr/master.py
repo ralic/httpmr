@@ -100,13 +100,22 @@ class OperationStatistics(object):
   WRITE = "write"
   MAP = "map"
   REDUCE = "reduce"
-  _valid_operation_names = [READ, WRITE, MAP, REDUCE]
+  CLEAN = "clean"
+  _valid_operation_names = [READ,
+                            WRITE,
+                            MAP,
+                            REDUCE,
+                            CLEAN]
   
   def __init__(self):
-    self._operation_timing = {}
+    self._operation_statistics = {}
     for name in self._valid_operation_names:
-      self._operation_timing[name] = 0
+      self._operation_statistics[name] = 0
+      self._operation_statistics[self._GetCounterName(name)] = 0
     self._started = False
+  
+  def _GetCounterName(self, operation_name):
+    return operation_name + "-count"
   
   def Start(self, operation):
     assert not self._started
@@ -116,9 +125,10 @@ class OperationStatistics(object):
     self._last_operation_time = time.time()
   
   def _Increment(self, name):
-    original = self._operation_timing[name]
-    self._operation_timing[name] = \
-        original + time.time() - self._last_operation_time
+    self._operation_statistics[name] += time.time() - self._last_operation_time
+  
+  def Count(self, name):
+    self._operation_statistics[self._GetCounterName(name)] += 1
   
   def Stop(self):
     assert self._started
@@ -127,8 +137,8 @@ class OperationStatistics(object):
   
   def GetStatistics(self):
     lines = []
-    for key in self._operation_timing:
-      lines.append("%s %s" % (key, self._operation_timing[key]))
+    for key in self._operation_statistics:
+      lines.append("%s %s" % (key, self._operation_statistics[key]))
     return "\n".join(lines)
 
 
@@ -273,9 +283,12 @@ class Master(webapp.RequestHandler):
 
   def GetMapper(self):
     """Handle mapper tasks."""
-    return self._GetGeneralMapper(self._mapper, self._source, self._mapper_sink)
+    return self._GetGeneralMapper(self._mapper,
+                                  self._source,
+                                  self._mapper_sink,
+                                  OperationStatistics.MAP)
   
-  def _GetGeneralMapper(self, mapper, source, sink):
+  def _GetGeneralMapper(self, mapper, source, sink, operation_statistics_name):
     """Handle general Mapper tasks.
     
     specifically base mapping and intermediate data cleanup.
@@ -302,22 +315,23 @@ class Master(webapp.RequestHandler):
     statistics.Start(OperationStatistics.READ)
     for key_value_pair in mapper_data:
       statistics.Stop()
+      statistics.Count(OperationStatistics.READ)
       if timer.ShouldStop():
         break
       key = key_value_pair[0]
       value = key_value_pair[1]
-      statistics.Start(OperationStatistics.MAP)
-      for output_key_value_pair in mapper.Map(key, value):
+      statistics.Start(operation_statistics_name)
+      for (output_key, output_value) in mapper.Map(key, value):
         statistics.Stop()
-        output_key = output_key_value_pair[0]
-        output_value = output_key_value_pair[1]
         
         statistics.Start(OperationStatistics.WRITE)
         sink.Put(output_key, output_value)
         statistics.Stop()
+        statistics.Count(OperationStatistics.WRITE)
         
-        statistics.Start(OperationStatistics.MAP)
+        statistics.Start(operation_statistics_name)
       statistics.Stop()
+      statistics.Count(operation_statistics_name)
       last_key_mapped = key
       values_mapped += 1
       timer.TaskCompleted()
@@ -363,18 +377,17 @@ class Master(webapp.RequestHandler):
         break
       values = reducer_keys_values[key]
       statistics.Start(OperationStatistics.REDUCE)
-      for output_key_value_pair in self._reducer.Reduce(key, values):
+      for (output_key, output_value) in self._reducer.Reduce(key, values):
         statistics.Stop()
-        
-        output_key = output_key_value_pair[0]
-        output_value = output_key_value_pair[1]
         
         statistics.Start(OperationStatistics.WRITE)
         self._sink.Put(output_key, output_value)
         statistics.Stop()
+        statistics.Count(OperationStatistics.WRITE)
         
         statistics.Start(OperationStatistics.REDUCE)
       statistics.Stop()
+      statistics.Count(OperationStatistics.REDUCE)
       last_key_reduced = key
       keys_reduced += 1
       timer.TaskCompleted()
@@ -407,6 +420,7 @@ class Master(webapp.RequestHandler):
     reducer_keys_values = {}
     statistics.Start(OperationStatistics.READ)
     for key_value_pair in reducer_data:
+      statistics.Count(OperationStatistics.READ)
       key = key_value_pair[0]
       value = key_value_pair[1].intermediate_value
       if key in reducer_keys_values:
@@ -423,9 +437,10 @@ class Master(webapp.RequestHandler):
   
   def GetCleanupMapper(self):
     """Handle Cleanup Mapper tasks."""
-    self._GetGeneralMapper(self._cleanup_mapper,
-                           self._reducer_source,
-                           sinks.NoOpSink())
+    return self._GetGeneralMapper(self._cleanup_mapper,
+                                  self._reducer_source,
+                                  sinks.NoOpSink(),
+                                  OperationStatistics.CLEAN)
   
   def RenderResponse(self, template_name, template_data):
     path = os.path.join(os.path.dirname(__file__),
