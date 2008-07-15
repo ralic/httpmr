@@ -19,6 +19,10 @@ class MissingRequiredParameterError(Error): pass
 # name of the template that should be rendered at task completion.  For
 # instance, when a mapper task is completed, the name of the template that will
 # be rendered is MAPPER_TASK_NAME + ".html"
+#
+# The *_MASTER_TASK_NAME constants are defined in the driver module because the
+# driver should be a standalone file (to facilitate ease of use, one can simply
+# copy that file around by itself).
 MAP_MASTER_TASK_NAME = driver.MAP_MASTER_TASK_NAME
 MAPPER_TASK_NAME = "mapper"
 REDUCE_MASTER_TASK_NAME = driver.REDUCE_MASTER_TASK_NAME
@@ -36,6 +40,8 @@ VALID_TASK_NAMES = [MAP_MASTER_TASK_NAME,
 SOURCE_START_POINT = "source_start_point"
 SOURCE_END_POINT = "source_end_point"
 SOURCE_MAX_ENTRIES = "source_max_entries"
+OPERATION_TIMEOUT_SEC = "operation_timeout"
+DEFAULT_OPERATION_TIMEOUT_SEC = 10
 GREATEST_UNICODE_CHARACTER = "\xEF\xBF\xBD"
 
 
@@ -238,14 +244,12 @@ class Master(webapp.RequestHandler):
                              "values are %s" % (task, VALID_TASK_NAMES))
     self.RenderResponse("%s.html" % task, template_data)
   
-  def _NextUrl(self, path_data):
+  def _TaskUrl(self, path_data):
     logging.debug("Rendering next url with path data %s" % path_data)
-    path = self.request.path_url
-    path_data["path"] = path
-    return ("%(path)s?task=%(task)s"
-            "&source_start_point=%(source_start_point)s"
-            "&source_end_point=%(source_end_point)s"
-            "&source_max_entries=%(source_max_entries)d") % path_data
+    params = []
+    for key in path_data:
+      params.append("%s=%s" % (key, path_data[key]))
+    return ("%s?%s" % (self.request.path_url, "&".join(params)))
   
   def _GetShardBoundaries(self):
     # TODO(peterdolan): Expand this to allow an arbitrary number of shards
@@ -271,10 +275,16 @@ class Master(webapp.RequestHandler):
     for boundary_tuple in self._GetShardBoundaryTuples():
       start_point = boundary_tuple[0]
       end_point = boundary_tuple[1]
-      urls.append(self._NextUrl({"task": task,
+      
+      timeout = DEFAULT_OPERATION_TIMEOUT_SEC
+      if OPERATION_TIMEOUT_SEC in self.request.params:
+        timeout = int(self.request.params[OPERATION_TIMEOUT_SEC])
+      
+      urls.append(self._TaskUrl({"task": task,
                                  SOURCE_START_POINT: start_point,
                                  SOURCE_END_POINT: end_point,
-                                 SOURCE_MAX_ENTRIES: 1000}))
+                                 SOURCE_MAX_ENTRIES: 1000,
+                                 OPERATION_TIMEOUT_SEC: timeout}))
     return urls
   
   def GetMapMaster(self):
@@ -300,13 +310,14 @@ class Master(webapp.RequestHandler):
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
+    timeout = int(self.request.params[OPERATION_TIMEOUT_SEC])
     
     statistics.Start(OperationStatistics.READ)
     mapper_data = source.Get(start_point, end_point, max_entries)
     statistics.Stop()
     
     # Initialize the timer, and begin timing our operations
-    timer = TaskSetTimer()
+    timer = TaskSetTimer(timeout)
     timer.Start()
     
     last_key_mapped = None
@@ -340,10 +351,11 @@ class Master(webapp.RequestHandler):
     next_url = None
     if values_mapped > 0:
       logging.debug("Completed %d map operations" % values_mapped)
-      next_url = self._NextUrl({"task": MAPPER_TASK_NAME,
+      next_url = self._TaskUrl({"task": MAPPER_TASK_NAME,
                                 SOURCE_START_POINT: last_key_mapped,
                                 SOURCE_END_POINT: end_point,
-                                SOURCE_MAX_ENTRIES: max_entries})
+                                SOURCE_MAX_ENTRIES: max_entries,
+                                OPERATION_TIMEOUT_SEC: timeout})
     else:
       next_url = None
     return { "next_url": next_url,
@@ -358,9 +370,12 @@ class Master(webapp.RequestHandler):
     statistics = OperationStatistics()
     
     # Grab the parameters for this map task from the URL
+    #
+    # TODO: This logic is replicated exactly in _GetGeneralMapper, refactor.
     start_point = self.request.params[SOURCE_START_POINT]
     end_point = self.request.params[SOURCE_END_POINT]
     max_entries = int(self.request.params[SOURCE_MAX_ENTRIES])
+    timeout = int(self.request.params[OPERATION_TIMEOUT_SEC])
     
     reducer_keys_values = self._GetReducerKeyValues(start_point,
                                                     end_point,
@@ -370,7 +385,7 @@ class Master(webapp.RequestHandler):
     last_key_reduced = None
     keys_reduced = 0
     # Initialize the timer, and begin timing our operations
-    timer = TaskSetTimer()
+    timer = TaskSetTimer(timeout)
     timer.Start()
     for key in reducer_keys_values:
       if timer.ShouldStop():
@@ -395,10 +410,11 @@ class Master(webapp.RequestHandler):
     next_url = None
     if keys_reduced > 0:
       logging.debug("Completed %d reduce operations" % keys_reduced)
-      next_url = self._NextUrl({"task": REDUCER_TASK_NAME,
+      next_url = self._TaskUrl({"task": REDUCER_TASK_NAME,
                                 SOURCE_START_POINT: last_key_reduced,
                                 SOURCE_END_POINT: end_point,
-                                SOURCE_MAX_ENTRIES: max_entries})
+                                SOURCE_MAX_ENTRIES: max_entries,
+                                OPERATION_TIMEOUT_SEC: timeout})
     else:
       next_url = None
     return { "next_url": next_url,
