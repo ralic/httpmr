@@ -206,8 +206,8 @@ class OperationThread(threading.Thread):
         tries += 1
         self.results.tries = tries
         return self._Fetch(url)
-      except urllib2.URLError, e:
-        logging.warning("URLError on fetch of %s: %s" % (url, str(e)))
+      except urllib2.HTTPError, e:
+        logging.warning("HTTPError on fetch of %s: %s" % (url, str(e)))
         self.results.errors.append(e)
         self._WaitForRetry(tries)
     raise TooManyTriesError("Too many tries on URL %s" % url)
