@@ -153,7 +153,8 @@ class IntermediateAppEngineSource(base.Source):
       # a full set of 1000 results, and depending on the keys that were seen in
       # that set either issue queries for the subsequent set of results or
       # stop iteration.
-      current_key = self._GetNextKey(start_point, end_point)
+      current_key = self._GetNextKey(start_point, end_point,
+                                     limit=(max_entries - num_values_returned))
       if current_key is None:
         return
       else:
@@ -165,7 +166,7 @@ class IntermediateAppEngineSource(base.Source):
         yield current_key, intermediate_value
         num_values_returned += 1
       
-  def _GetIntermediateValuesForKey(self, intermediate_key):
+  def _GetIntermediateValuesForKey(self, intermediate_key, limit):
     """For the given intermediate value key, get all intermediate values.
     
     Get all intermediate values from the Datastore.
@@ -176,9 +177,6 @@ class IntermediateAppEngineSource(base.Source):
     datastore.  If not, then we can only retrieve the first 1000 entries, and
     log a warning if we retrieve exactly 1000 entries for a given key.
     """
-    # TODO: Parse this limit value from the URL
-    limit = 1000
-
     # We're guaranteed by the intermediate value sink that no intermediate
     # values are written with the _actual_ minimum value.  Always 1 greater.
     current_nonsense = 1 - sys.maxint
