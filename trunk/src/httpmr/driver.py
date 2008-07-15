@@ -27,6 +27,7 @@ MAP_MASTER_TASK_NAME = "map_master"
 REDUCE_MASTER_TASK_NAME = "reduce_master"
 INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME = "cleanup_master"
 OPERATION_TIMEOUT_SEC = "operation_timeout"
+MIN_OPERATION_TIMEOUT_SEC_VALUE = 0.5
 INFINITE_PARAMETER_VALUE = -1
 
 
@@ -215,14 +216,17 @@ class OperationThread(threading.Thread):
     raise TooManyTriesError("Too many tries on URL %s" % url)
   
   def _WaitForRetry(self, tries):
-    wait_time_sec = min(tries * tries, 60)
-    logging.debug("Sleeping for %s seconds." % wait_time_sec)
+    wait_time_sec = min(30 * tries, 600)
+    logging.info("Sleeping for %s seconds." % wait_time_sec)
     time.sleep(wait_time_sec)
     
   def _Fetch(self, url):
     safe_url = self._GetSafeUrl(url)
     logging.debug("Fetching %s" % safe_url)
-    return urllib2.urlopen(safe_url).read()
+    f = urllib2.urlopen(safe_url)
+    contents = f.read()
+    f.close()
+    return contents
   
   def _GetSafeUrl(self, url):
     parts = urlparse.urlsplit(url)
@@ -245,7 +249,8 @@ class OperationThread(threading.Thread):
         # At this point current_timeout is a string
         current_timeout = value
     if current_timeout is not None:
-      new_timeout = float(current_timeout) / 2
+      new_timeout = max(float(current_timeout) - 1,
+                        MIN_OPERATION_TIMEOUT_SEC_VALUE)
       return url.replace("%s=%s" % (OPERATION_TIMEOUT_SEC, current_timeout),
                          "%s=%s" % (OPERATION_TIMEOUT_SEC, new_timeout))
     else:
@@ -281,9 +286,15 @@ class HTTPMRDriver(object):
     self.lock = threading.Lock()
     
   def Run(self):
+    """Begin the Driver's Map - Reduce - Cleanup phase.
+    
+    It is important to use this method as the primary entry point, as it may
+    be utilized in the future to precompute optimal operation parameters in the
+    future.
+    """
     logging.info("Beginning HTTPMR Driver Run with base URL %s" %
                  self.httpmr_base)
-    self._Map()
+    self.Map()
 
   def _HandleUnrecoverableOperationError(self, url, error):
     logging.error("Unrecoverable error on url %s: %s; %s" %
@@ -291,24 +302,24 @@ class HTTPMRDriver(object):
     for thread in HTTPMRDriver.threads:
       thread.Cancel()
     logging.info("Going to cleanup.")
-    self._Cleanup()
+    self.Cleanup()
     
-  def _Map(self):
+  def Map(self):
     self._LaunchPhase(MAP_MASTER_TASK_NAME, self._AllMapOperationsComplete)
   
   def _AllMapOperationsComplete(self):
     logging.info("Done Mapping!")
-    self._Reduce()
+    self.Reduce()
   
-  def _Reduce(self):
+  def Reduce(self):
     self._LaunchPhase(REDUCE_MASTER_TASK_NAME,
                       self._AllReduceOperationsComplete)
   
   def _AllReduceOperationsComplete(self):
     logging.info("Done Reducing!")
-    self._Cleanup()
+    self.Cleanup()
     
-  def _Cleanup(self):
+  def Cleanup(self):
     self._LaunchPhase(INTERMEDIATE_DATA_CLEANUP_MASTER_TASK_NAME,
                       self._AllCleanupOperationsComplete)
     
@@ -324,11 +335,13 @@ class HTTPMRDriver(object):
         if key in b:
           sum_dict[key] = a[key] + b[key]
       return sum_dict
-    return reduce(AddDicts, self.results)
+    return reduce(AddDicts, map(lambda result: result.statistics,
+                                self.results))
   
   def _LaunchPhase(self, phase_task_name, all_operations_complete_callback):
     logging.info("Starting %s phase." % phase_task_name)
     base_urls = self._GetInitialUrls(phase_task_name)
+    logging.debug("Initial URLs: %s" % ", ".join(base_urls))
     self.threads_inflight = 0
     for url in base_urls:
       thread = self._CreateOperationThread(url,
@@ -415,12 +428,22 @@ def main():
                             help="The maximum number of times any given "
                                 + "operation can fail before a fatal error is"
                                 + " thrown.  -1 for inf.")
+  options_parser.add_option("-c",
+                            "--cleanup_only",
+                            action="store_true",
+                            dest="cleanup_only",
+                            default=False,
+                            help="Only execute the intermediate data cleanup "
+                                + "phase.")
   (options, args) = options_parser.parse_args()
   
   driver = HTTPMRDriver(options.httpmr_base,
                         options.max_per_operation_failures,
                         options.max_operations_inflight)
-  driver.Run()
+  if options.cleanup_only:
+    driver.Cleanup()
+  else:
+    driver.Run()
 
 
 if __name__ == "__main__":
