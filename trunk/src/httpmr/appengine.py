@@ -153,8 +153,7 @@ class IntermediateAppEngineSource(base.Source):
       # a full set of 1000 results, and depending on the keys that were seen in
       # that set either issue queries for the subsequent set of results or
       # stop iteration.
-      current_key = self._GetNextKey(start_point, end_point,
-                                     limit=(max_entries - num_values_returned))
+      current_key = self._GetNextKey(start_point, end_point)
       if current_key is None:
         return
       else:
@@ -162,7 +161,9 @@ class IntermediateAppEngineSource(base.Source):
         # currently serving
         start_point = current_key
       
-      for intermediate_value in self._GetIntermediateValuesForKey(current_key):
+      for intermediate_value in \
+          self._GetIntermediateValuesForKey(current_key,
+                                            max_entries - num_values_returned):
         yield current_key, intermediate_value
         num_values_returned += 1
       
