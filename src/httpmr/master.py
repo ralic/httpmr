@@ -303,6 +303,10 @@ class Master(webapp.RequestHandler):
     
     specifically base mapping and intermediate data cleanup.
     """
+    assert isinstance(mapper, base.Mapper)
+    assert isinstance(source, base.Source)
+    assert isinstance(sink, base.Sink)
+    
     # Initialize the statistics object, to time the operations for reporting
     statistics = OperationStatistics()
 
@@ -324,6 +328,11 @@ class Master(webapp.RequestHandler):
     last_key_mapped = None
     values_mapped = 0
 
+    # TODO: Much of this mess with statistics recording can be cleaned up by
+    # setting the statistics object in the class that's performing the relevant
+    # operation.  i.e. source.SetStatisticsObject(statistics), mapper.SetStat...
+    # The relevant time-consuming operation would then record the time it
+    # spends.  This can all be handled in base classes.
     statistics.Start(OperationStatistics.READ)
     for key_value_pair in mapper_data:
       statistics.Stop()
